@@ -6,8 +6,6 @@
 
 #include <p18lf25k22.h>		// This file includes definitions for all of the
                             // registers on our chip
-#include <stdio.h>          // For the sprintf() function
-
 
 /////////////////////////////////////////////////////////////////////////////
 // Pragma statements
