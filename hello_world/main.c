@@ -4,7 +4,7 @@
 // so that we don't have to write everything by ourselves.
 /////////////////////////////////////////////////////////////////////////////
 
-#include <p18lf25k22.h>		// This file includes definitions for all of the
+#include <p18lf25k22.h>	    // This file includes definitions for all of the
                             // registers on our chip
 
 /////////////////////////////////////////////////////////////////////////////
