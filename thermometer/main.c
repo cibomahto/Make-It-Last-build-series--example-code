@@ -35,7 +35,6 @@ void main (void);
 void setup(void);
 void loop(void);
 
-#define NUMSAMPLES 50
 
 /////////////////////////////////////////////////////////////////////////////
 // Function definitions
@@ -57,7 +56,7 @@ void main (void)
     }
 }
 
-// Wait for roughly 1 second (measured by hand)
+// Function that takes roughly 1 second to run
 void waitASecond(void) {
     int i;
     int j;
@@ -70,7 +69,7 @@ void waitASecond(void) {
     }
 }
 
-// Wait a certain number of seconds
+// Function to delay for a specified number of seconds
 void wait( int time ) {
     int i;
 
@@ -81,7 +80,8 @@ void wait( int time ) {
     }
 }
 
-
+// Function to write a character string to the serial port, from:
+// C:\MCC18\src\pmc_common\USART\u1puts.c
 void puts1USART( char *data)
 {
     do
@@ -90,6 +90,7 @@ void puts1USART( char *data)
         TXREG1 = *data; // Write the data byte to the USART2
     } while( *data++ );
 }
+
 
 // Map function, from:
 // http://www.arduino.cc/en/Reference/Map
@@ -101,55 +102,50 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
 // This function is called once, when the microcontroller is turned on.
 void setup(void) {
+  // Processor configuration
+
     // Configure the oscillator to run at 16 MHz
     OSCCONbits.IRCF = 111;
 
+  // ADC configuration
+
     // Configure the internal voltage regulator to output 2.048V
     // This voltage is stable over varying battery voltage, and is used
-    // as a reference when measuring the thermometer
+    // as a reference when measuring the thermometer.
     VREFCON0bits.FVREN = 1;
     VREFCON0bits.FVRS = 0b10; // Positive reference = 2.048V
 
-
-    // Configure the ADC to use ground (0V) for the negative reference, and
+    // Set the ADC to use ground (0V) for the negative reference, and
     // the internal voltage regulator (2.048V) as the positive reference.
-    ADCON1bits.NVCFG = 0; // Negative reference = 0V
-    ADCON1bits.PVCFG = 0b10; // Positive reference = 2.048V
+    ADCON1bits.NVCFG = 0;     // Negative reference = 0V
+    ADCON1bits.PVCFG = 0b10;  // Positive reference = 2.048V
+
+    // Set the speed that the ADC should capture data
+    ADCON2bits.ADFM=1;        // Right Justified
+    ADCON2bits.ACQT=0b111;    // Acquisition time
+    ADCON2bits.ADCS=0b010;    // Fosc/32
+
+    // Configure pin 13 (port C, pin 2) as an input
+    TRISCbits.TRISC2 = 1;	  // Make the pin an input
+    ANSELCbits.ANSC2 = 1;     // Specifically, an analog input
+
+    // Tell the ADC to use pin 13 (input 14) as the input, and turn on the ADC
+    ADCON0bits.CHS = 14;      // Select pin 13 as the input
+    ADCON0bits.ADON = 1;      // Turn the ADC on
 
 
-    // Conversion start & polling for completion
-    // are included.
-    ADCON2bits.ADFM=1; // Right Justified
-    ADCON2bits.ACQT=0b111; // Acquisition time
-    ADCON2bits.ADCS=0b010; // Fosc/32
-
-    // Set port C, pin 2 as an input
-    TRISCbits.TRISC2 = 1;
-    ANSELCbits.ANSC2 = 1;
-
-
-    // Select input 14 and turn on the ADC
-    ADCON0bits.CHS = 14;
-    ADCON0bits.ADON = 1;
-
-// Turn on the EUSART
-    TXSTA1 = 0; // Reset USART registers to POR state
-    RCSTA1 = 0;
-
+// Serial port configuration
+    // Configure the serial port to run at 9600 baud
+    // (see manual, page 275)
     BAUD1CONbits.BRG16 = 0;
-
+    SPBRG1 = 25;
     TXSTA1bits.BRGH = 0; // Baud rate select
-    SPBRG1 = 25; // Assume 16MHz clock and 9600 baud serial
 
-    PIE1bits.RC1IE = 0; // Disable serial interrupts
-    PIE1bits.TX1IE = 0;
-
+    // Enable the serial port
     TXSTA1bits.TXEN = 1; // Enable transmitter
     RCSTA1bits.SPEN = 1; // Enable receiver
-
-    // Wait until the ADC is set up
-    while (ADCON0bits.GO == 1) {}
 }
+
 
 // This function is called repeatedly
 void loop(void) {
@@ -158,31 +154,36 @@ void loop(void) {
     unsigned char i;
     char buffer[30];
 
-    // read the ADC port a number of times
-    for (i = 0; i < NUMSAMPLES; i++) {
-        // Read the ADC
+    // Read the ADC port a bunch of times and average the results together,
+    // so that we get a more stable output. Taking a single sample can result
+    // in noisy data!
+    for (i = 0; i < 64; i++) {
+        // Signal the ADC to start conversion
         ADCON0bits.GO = 1;
+
+        // And wait till it finishes
         while (ADCON0bits.GO == 1) {}
 
+		// Then, add the result to the result count
         results += ((int)ADRESH << 8) + ADRESL;
     }
-    temperature = results/NUMSAMPLES;
 
-    // Convert the ADC counts into Celcius
+    // Finally, determine the average by dividing the total counts by the
+    // number of samples that were taken.
+    temperature = results/64;
+
+    // Convert the ADC counts into a temperature
     // Be sure to fill in your own measurements for the first two values!
     // (freezing and boiling measurements, in counts)
-    temperature = map(temperature, 255, 738, 0, 100);
+    temperature = map(temperature, 255, 738, 0, 100);   // Celcius
+//    temperature = map(temperature, 255, 738, 32, 212);  // Fahrenheit
 
-    // Or use this one for Fahrenheit
-//    temperature = map(temperature, 255, 738, 32, 212);
-
-
-    // then average the results to get a final reading
+    // Write the results out to a string
     sprintf(buffer,"%u\n\r", temperature);
 
-    // Copy it out into a buffer and send to serial
+    // Then send that string to the serial port
     puts1USART(buffer);
 
-   // now wait for five seconds
+   // Wait for five seconds before checking the temperature again.
    wait(5);
 }
