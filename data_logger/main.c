@@ -296,7 +296,7 @@ void loop(void) {
     unsigned int i;
     unsigned char temperature;
     unsigned char data;
-    char buffer[30];
+    char buffer[50];
 
     // Check if the serial port has overflown, and clear the event if that happened.
     if (RCSTAbits.OERR) {
