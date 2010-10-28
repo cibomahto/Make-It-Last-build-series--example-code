@@ -284,7 +284,7 @@ void setup( void ) {
 
 unsigned int logCount = 0;     // Number of samples that the logger has acquired
 
-int logInterval = 2; // Interval that the 
+int logInterval = 10; // Number of seconds between measurements
 
 char logging = 0;     // Specifies whether we are actively logging or not
 
