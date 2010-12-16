@@ -32,6 +32,7 @@
 #undef INTCON
 #undef INTCONbits
 
+
 /////////////////////////////////////////////////////////////////////////////
 // Function declarations
 // Declare any user functions that you want to use here
@@ -42,7 +43,23 @@ void loop(void);
 
 void receive_interrupt(void);
 int measureSwitch(void);
-void moveServo(unsigned int pos);
+void moveServo(unsigned int pos, unsigned int counts);
+
+
+/////////////////////////////////////////////////////////////////////////////
+// Global variables and constants
+/////////////////////////////////////////////////////////////////////////////
+#define COUNT 250                     //@ 4MHz = 125uS.
+#define DELAY for(i=0;i<COUNT;i++)
+#define OPENSW 1000                   //Un-pressed switch value
+#define TRIP 100                      //Difference between pressed
+
+#define HYST 65                       //amount to change
+                                      //from pressed to un-pressed
+
+#define SWITCH_PRESSED 1
+#define SWITCH_UNPRESSED 0
+
 
 /////////////////////////////////////////////////////////////////////////////
 // Function definitions
@@ -76,14 +93,14 @@ void main ( void )
 
 
 // Output a control signal to move the servo to a new position
-void moveServo(unsigned int pos) {
+void moveServo(unsigned int pos, unsigned int counts) {
     unsigned int a, i;
 
     // Turn on power to the servo
     PORTCbits.RC2 = 1;
 
     // Generate the control signal to move the servo
-    for (i = 0; i < 80; i++) {
+    for (i = 0; i < counts; i++) {
 		// Turn on the servo and delay for a short time
         PORTCbits.RC3 = 1;
         for (a = 0; a < pos + 20; a++) {}
@@ -139,11 +156,20 @@ void setup( void ) {
     INTCONbits.PEIE = 1;
     INTCONbits.GIE = 1;
 
-  // I/O pin confiugration
+  // Capacitive sensor configuration
+    CTMUCONH = 0x00;          //make sure CTMU is disabled
+    CTMUCONL = 0x90;
+    CTMUICON = 0x01;          //0.55uA, Nominal - No Adjustment
 
+
+  // I/O pin confiugration
     // Make the status LED an output
     TRISAbits.TRISA0 = 0;     // Make the LED pin an output
     PORTAbits.RA0 = 0;        // but turn it off to disable the LED
+
+    // Make the second status LED an output
+    TRISAbits.TRISA3 = 0;     // Make the LED pin an output
+    PORTAbits.RA3 = 0;        // but turn it off to disable the LED
 
     // Make the servo power switch an output
     TRISCbits.TRISC2 = 0;
@@ -164,6 +190,8 @@ void setup( void ) {
 int lastState, in;
 char firstRun = 1;
 
+int stalkPosition = 0;	// When we start, assume the flower stalk is down
+
 void loop(void) {
 
     // Read in the value of the capacitive sensor
@@ -175,17 +203,27 @@ void loop(void) {
         lastState = in;
     }
 
-    // If the input is differente from the last time (we sensed a
-    // touch!), move the servo.
+    // If we just started detecting a touch, change the flower position
     if (in != lastState) {
         lastState = in;
 
-        if (lastState == 0) {
-            moveServo(60);
-        } else {
-            moveServo(10);
+        if (lastState == SWITCH_PRESSED) {
+            if (stalkPosition == 0) {
+                moveServo(60, 70);  // up: Adjust this to get your plant
+                                    //     to raise to the correct height.
+                stalkPosition = 1;  // record that we raised the stalk
+            } else {
+                moveServo(10, 100); // down Adjust this so that the plant
+                                    //      goes back into the ground.
+                stalkPosition = 0;  // record that we lowered the stalk
+            }
         }
     }
+
+	// There is nothing else to do, so go to sleep. The processor will wake
+    // back up in the next second when the timer overflows, and start running
+    // from this point.
+    Sleep();
 }
 
 
@@ -195,35 +233,19 @@ void loop(void) {
 #pragma interruptlow receive_interrupt
 void receive_interrupt (void)
 {
-    // If the interrupt was caused by the timer overflowing, toggle the LED.
+
     if (PIR1bits.TMR1IF == 1) {
         TMR1H = 128;
+        // Anything inside of this loop happens once a second. It can be used
+        // to blink a light, keep track of how much time has passed, etc.
 
-        if (LATAbits.LATA0 != 1) {
-            LATAbits.LATA0 = 1;
-        }
-        else {
-            LATAbits.LATA0 = 0;
-        }
-
-        // Clear the interrupt
+        // For now, just clear the timer interrupt
         PIR1bits.TMR1IF = 0;
     }
 }
 
 
 // Capacitive sensing routine from PIC 18lf22 datasheet, page 326
-
-#define COUNT 50                     //@ 4MHz = 125uS.
-#define DELAY for(i=0;i<COUNT;i++)
-#define OPENSW 1000                   //Un-pressed switch value
-#define TRIP 100                      //Difference between pressed
-
-#define HYST 65                       //amount to change
-                                      //from pressed to un-pressed
-#define PRESSED 1
-#define UNPRESSED 0
-
 int measureSwitch(void)
 {
     unsigned int Vread;           //storage for reading
@@ -235,32 +257,41 @@ int measureSwitch(void)
     //assume CTMU and A/D have been setup correctly
     //see Example 25-1 for CTMU & A/D setup
 
+  // Turn on the CTMU
     CTMUCONHbits.CTMUEN = 1;      // Enable the CTMU
     CTMUCONLbits.EDG1STAT = 0;    // Set Edge status bits to zero
     CTMUCONLbits.EDG2STAT = 0; 
+
+  // First, connect it to ground so that we have a known starting condition
     CTMUCONHbits.IDISSEN = 1;     //drain charge on the circuit
-    DELAY;  //wait 125us
+    Nop();
     CTMUCONHbits.IDISSEN = 0;     //end drain of circuit
 
+  // Next, enable the .55uA current source and wait for a moment
     CTMUCONLbits.EDG1STAT = 1;    //Begin charging the circuit
                                   //using CTMU current source
+
     DELAY;                        //wait for 125us
     CTMUCONLbits.EDG1STAT = 0;    //Stop charging circuit
 
+  // Now, measure the voltage on the pin
     PIR1bits.ADIF = 0;            //make sure A/D Int not set
     ADCON0bits.GO=1;              //and begin A/D conv.
     while(!PIR1bits.ADIF);        //Wait for A/D convert complete
 
     Vread = ADRES;                //Get the value from the A/D
 
+  // Finally, turn off the CTMU and determine if we measured a touch or not.
     CTMUCONHbits.CTMUEN = 0;      // Disable the CTMU
 
     if(Vread < OPENSW - TRIP) 
     {
-        return PRESSED;
+        LATAbits.LATA3 = 1;
+        return SWITCH_PRESSED;
     }
     else if(Vread > OPENSW - TRIP + HYST)
     {
-        return UNPRESSED;
+        LATAbits.LATA3 = 0;
+        return SWITCH_UNPRESSED;
     }
 }
